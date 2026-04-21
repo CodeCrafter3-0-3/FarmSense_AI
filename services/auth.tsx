@@ -1,8 +1,8 @@
 // Auth Context for FarmSense AI
 // Simple email/password auth using Firebase Realtime Database
-import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { db, ref, set, get } from './firebase';
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { db, get, ref, set } from './firebase';
 
 export interface AuthUser {
   userId: string;
@@ -32,9 +32,9 @@ const AuthContext = createContext<AuthContextType>({
   loading: true,
   login: async () => ({ success: false }),
   signup: async () => ({ success: false }),
-  logout: async () => {},
-  updateProfile: async () => {},
-  setDeviceCode: async () => {},
+  logout: async () => { },
+  updateProfile: async () => { },
+  setDeviceCode: async () => { },
 });
 
 // Simple hash for demo (NOT production-grade)
@@ -80,7 +80,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const userKey = emailToKey(email);
       console.log('Attempting signup for:', email);
-      
+
       // Check if user already exists
       const existingRef = ref(db, `auth/${userKey}`);
       const existingSnap = await get(existingRef).catch(err => {
@@ -134,7 +134,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const userKey = emailToKey(email);
       console.log('Attempting login for:', email);
-      
+
       const authRef = ref(db, `auth/${userKey}`);
       const authSnap = await get(authRef).catch(err => {
         console.error('Firebase GET failed (Login):', err);
@@ -176,7 +176,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   async function updateProfile(updates: Partial<AuthUser>) {
     if (!user) return;
-    
+
     const updatedUser = { ...user, ...updates };
     setUser(updatedUser);
     await AsyncStorage.setItem('farmsense_user', JSON.stringify(updatedUser));
