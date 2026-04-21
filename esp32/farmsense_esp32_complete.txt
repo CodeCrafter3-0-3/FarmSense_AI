@@ -1,0 +1,257 @@
+/*
+ * ═══════════════════════════════════════════════════════════════
+ * FarmSense AI — Professional Firmware (v3.2)
+ * ═══════════════════════════════════════════════════════════════
+ * Upgrades: X-axis Nav, High-Speed UI, Big Text, Serial Dashboard.
+ * ═══════════════════════════════════════════════════════════════
+ */
+
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <SPI.h>
+#include "DHT.h"
+
+// ═══════════════════════════════════════════
+// CONFIGURATION
+// ═══════════════════════════════════════════
+const char* WIFI_SSID     = "Shinchan_4G";
+const char* WIFI_PASSWORD = "manmeet8549";
+const char* FIREBASE_HOST = "https://farmsense-580c0-default-rtdb.firebaseio.com";
+const char* DEVICE_CODE   = "1234";
+
+// --- PINS ---
+#define DHT_PIN          4
+#define DHT_TYPE         DHT11
+#define SOIL_SENSOR_PIN  34
+#define RELAY_PIN        26
+#define LED_PIN          2
+
+// OLED SPI
+#define OLED_MOSI   23
+#define OLED_CLK    18
+#define OLED_DC     17
+#define OLED_CS     5
+#define OLED_RESET  16
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+
+// Manual Switch (SPDT)
+#define SWITCH_PIN  27   // Manual On/Off
+
+// --- TIMING ---
+#define SENSOR_INTERVAL      10000
+#define PUMP_CHECK_INTERVAL  5000
+#define HEARTBEAT_INTERVAL   5000
+#define SERIAL_DASH_INTERVAL 2000
+#define UI_REFRESH_RATE      50    // High speed UI
+#define OVERRIDE_TIMEOUT     30000 
+
+// ═══════════════════════════════════════════
+// GLOBALS & OBJECTS
+// ═══════════════════════════════════════════
+DHT dht(DHT_PIN, DHT_TYPE);
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &SPI, OLED_DC, OLED_RESET, OLED_CS);
+
+// UI States - No more menus, just one screen
+bool showDetails = true;
+
+// System Data
+float currentTemp = 0, currentHum = 0;
+int currentMoisture = 0;
+bool pumpOn = false;
+String controlMode = "AUTO"; 
+bool manualOverride = false;
+unsigned long overrideStartTime = 0;
+
+// Intervals
+unsigned long lastSensorRead = 0;
+unsigned long lastPumpCheck  = 0;
+unsigned long lastHeartbeat   = 0;
+unsigned long lastWiFiRetry   = 0;
+unsigned long lastSerialDash  = 0;
+unsigned long lastUIRefresh   = 0;
+
+// ═══════════════════════════════════════════
+// SETUP
+// ═══════════════════════════════════════════
+void setup() {
+  Serial.begin(115200);
+  Serial.println("\n[SYSTEM] Initializing FarmSense AI v3.2...");
+
+  pinMode(RELAY_PIN, OUTPUT);
+  pinMode(LED_PIN, OUTPUT);
+  pinMode(SWITCH_PIN, INPUT_PULLUP);
+  setRelay(false); 
+  
+  dht.begin();
+  
+  if(!display.begin(SSD1306_SWITCHCAPVCC)) Serial.println("[OLED] Failed");
+  display.clearDisplay();
+  display.setTextColor(WHITE);
+  display.setTextSize(2); // Start with Big Text
+  display.setCursor(10, 20);
+  display.println("FarmSense");
+  display.setTextSize(1);
+  display.setCursor(10, 45);
+  display.println("Booting v3.2...");
+  display.display();
+
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+}
+
+// ═══════════════════════════════════════════
+// MAIN LOOP
+// ═══════════════════════════════════════════
+void loop() {
+  unsigned long now = millis();
+  
+  manageWiFi(now);
+
+  // Background Sensors & Cloud
+  if (now - lastSensorRead >= SENSOR_INTERVAL) { lastSensorRead = now; readAndUploadSensors(); }
+  if (now - lastPumpCheck >= PUMP_CHECK_INTERVAL) { lastPumpCheck = now; checkPumpStatus(now); }
+  if (now - lastHeartbeat >= HEARTBEAT_INTERVAL) { lastHeartbeat = now; if (WiFi.status() == WL_CONNECTED) registerDevice(); }
+
+  // Serial Monitor Dashboard (Real-time data)
+  if (now - lastSerialDash >= SERIAL_DASH_INTERVAL) { lastSerialDash = now; printSerialDash(); }
+
+  // Hardware Control
+  handleManualSwitch();
+  if (now - lastUIRefresh >= UI_REFRESH_RATE) { lastUIRefresh = now; updateOLED(); }
+}
+
+// ═══════════════════════════════════════════
+// SERIAL DASHBOARD
+// ═══════════════════════════════════════════
+void printSerialDash() {
+  Serial.println("\n========================================");
+  Serial.println("🌱 FARMSENSE AI REAL-TIME DATA");
+  Serial.println("----------------------------------------");
+  Serial.printf(" Moisture:    %d%%\n", currentMoisture);
+  Serial.printf(" Temp:        %.1f °C\n", currentTemp);
+  Serial.printf(" Humidity:    %.1f %%\n", currentHum);
+  Serial.printf(" Pump Status: [%s]\n", pumpOn ? "ON" : "OFF");
+  Serial.printf(" Mode:        %s\n", manualOverride ? "MANUAL (OVERRIDE)" : controlMode.c_str());
+  Serial.printf(" WiFi Status: %s\n", (WiFi.status() == WL_CONNECTED) ? "CONNECTED" : "DISCONNECTED");
+  Serial.println("========================================");
+}
+
+// ═══════════════════════════════════════════
+// HARDWARE CONTROL (SPDT SWITCH)
+// ═══════════════════════════════════════════
+void handleManualSwitch() {
+  static bool lastSwitchState = -1;
+  bool currentSwitchState = digitalRead(SWITCH_PIN); // LOW = ON, HIGH = OFF (Pullup)
+
+  if (currentSwitchState != lastSwitchState) {
+    lastSwitchState = currentSwitchState;
+    manualOverride = true; // Switch use always overrides auto
+    bool pumpState = (currentSwitchState == LOW);
+    reqPumpChange(pumpState, "MANUAL_SWITCH");
+    Serial.printf("[SWITCH] Manual Pump: %s\n", pumpState ? "ON" : "OFF");
+  }
+}
+
+void updateOLED() {
+  display.clearDisplay();
+  
+  // Header
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.println("FARMSENSE AI MONITOR");
+  display.drawLine(0, 10, 128, 10, WHITE);
+
+  // Moisture (Main detail)
+  display.setCursor(0, 18);
+  display.setTextSize(1);
+  display.println("SOIL MOISTURE:");
+  display.setTextSize(3);
+  display.setCursor(0, 28);
+  display.printf("%d%%", currentMoisture);
+
+  // Secondary Details (Right side)
+  display.setTextSize(1);
+  display.setCursor(75, 20);
+  display.printf("T:%.1fC", currentTemp);
+  display.setCursor(75, 30);
+  display.printf("H:%.0f%%", currentHum);
+  
+  // Status Footer
+  display.drawLine(0, 50, 128, 50, WHITE);
+  display.setCursor(0, 54);
+  display.setTextSize(1);
+  display.printf("PUMP:%s [%s]", pumpOn ? "ON" : "OFF", manualOverride ? "MAN" : controlMode.c_str());
+  
+  display.setCursor(95, 54);
+  display.printf("%s", (WiFi.status() == WL_CONNECTED) ? "WIFI" : "OFF!");
+
+  display.display();
+}
+
+// ═══════════════════════════════════════════
+// CLOUD, SENSORS & HARDWARE
+// ═══════════════════════════════════════════
+void manageWiFi(unsigned long now) {
+  if (WiFi.status() != WL_CONNECTED) {
+    digitalWrite(LED_PIN, LOW);
+    if (now - lastWiFiRetry >= 10000) {
+      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+      lastWiFiRetry = now;
+    }
+  } else { digitalWrite(LED_PIN, HIGH); }
+}
+
+void reqPumpChange(bool on, String source) {
+  static unsigned long lastToggle = 0;
+  if (millis() - lastToggle < 1000) return;
+  if (on != pumpOn) {
+    pumpOn = on; setRelay(on); lastToggle = millis();
+    if (WiFi.status() == WL_CONNECTED) httpPut(String(FIREBASE_HOST) + "/irrigation/" + DEVICE_CODE + "/pumpStatus.json", on ? "\"ON\"" : "\"OFF\"");
+  }
+}
+
+void readAndUploadSensors() {
+  float t = dht.readTemperature(); float h = dht.readHumidity();
+  if (!isnan(t) && t < 100) { currentTemp = t; currentHum = h; }
+  int raw = analogRead(SOIL_SENSOR_PIN);
+  currentMoisture = constrain(map(raw, 4095, 1500, 0, 100), 0, 100);
+  if (WiFi.status() == WL_CONNECTED) {
+    StaticJsonDocument<256> doc;
+    doc["soilMoisture"] = currentMoisture; doc["temperature"] = round(currentTemp * 10) / 10.0;
+    doc.createNestedObject("timestamp")[".sv"] = "timestamp";
+    String json; serializeJson(doc, json);
+    httpPut(String(FIREBASE_HOST) + "/sensorData/" + DEVICE_CODE + "/latest.json", json);
+    httpPost(String(FIREBASE_HOST) + "/sensorData/" + DEVICE_CODE + "/history.json", json);
+  }
+}
+
+void checkPumpStatus(unsigned long now) {
+  if (WiFi.status() != WL_CONNECTED) return;
+  HTTPClient http;
+  http.begin(String(FIREBASE_HOST) + "/irrigation/" + DEVICE_CODE + ".json");
+  if (http.GET() == 200) {
+    StaticJsonDocument<512> doc; deserializeJson(doc, http.getString());
+    if (!manualOverride) {
+      controlMode = String(doc["mode"] | "MANUAL");
+      bool decision = (String(doc["pumpStatus"] | "OFF") == "ON");
+      if (controlMode == "AUTO" && currentMoisture < (doc["threshold"] | 30) && !decision) decision = true;
+      reqPumpChange(decision, controlMode);
+    }
+  }
+  http.end();
+}
+
+void registerDevice() {
+  StaticJsonDocument<200> doc; doc["status"] = "online";
+  doc.createNestedObject("lastSeen")[".sv"] = "timestamp";
+  String json; serializeJson(doc, json);
+  httpPatch(String(FIREBASE_HOST) + "/devices/" + DEVICE_CODE + ".json", json);
+}
+
+void setRelay(bool on) { digitalWrite(RELAY_PIN, on ? LOW : HIGH); }
+bool httpPut(String u, String j) { HTTPClient h; h.begin(u); int c = h.PUT(j); h.end(); return c == 200; }
+bool httpPatch(String u, String j) { HTTPClient h; h.begin(u); int c = h.PATCH(j); h.end(); return c == 200; }
+bool httpPost(String u, String j) { HTTPClient h; h.begin(u); int c = h.POST(j); h.end(); return c == 200; }

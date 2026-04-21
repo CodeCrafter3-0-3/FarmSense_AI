@@ -1,0 +1,32 @@
+{
+  "rules": {
+    "devices": {
+      ".read": true,
+      "$deviceCode": {
+        ".write": "data.exists() || !data.exists()"
+      }
+    },
+    "users": {
+      "$userId": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "sensorData": {
+      "$deviceCode": {
+        ".read": "true",
+        ".write": "true"
+      }
+    },
+    "irrigation": {
+      "$deviceCode": {
+        ".read": "true",
+        ".write": "true"
+      }
+    },
+    "auth": {
+      ".read": "true",
+      ".write": "true"
+    }
+  }
+}
