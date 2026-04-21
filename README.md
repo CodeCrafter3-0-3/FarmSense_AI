@@ -1,50 +1,91 @@
-# Welcome to your Expo app 👋
+# FarmSense AI: Advanced Agricultural Intelligence System 🌿🚀
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+**FarmSense AI** is a production-grade, end-to-end smart farming ecosystem designed to bridge the gap between traditional agriculture and modern AI-driven insights. It combines real-time IoT monitoring, automated irrigation control, and advanced crop visualization analysis into a seamless experience.
 
-## Get started
+![Dashboard Preview](https://via.placeholder.com/1200x600/013a20/ffffff?text=FarmSense+AI+Ecosystem+Overview)
 
-1. Install dependencies
+---
 
-   ```bash
-   npm install
-   ```
+## 🏗️ System Architecture
 
-2. Start the app
+The ecosystem consists of three main pillars:
 
-   ```bash
-   npx expo start
-   ```
+### 1. 📱 Mobile Application (React Native / Expo)
+A sleek, user-centric mobile interface for farmers to monitor their land from anywhere.
+- **AI Crop Analysis**: Real-time visualization using NVIDIA-powered AI models to detect crop health issues.
+- **Dynamic Recommendations**: Personalized farming advice based on live sensor data.
+- **Interactive Chat**: Context-aware AI assistant to deep-dive into farm metrics.
+- **Secure Auth**: Production-ready Firebase authentication system.
 
-In the output, you'll find options to open the app in a
+### 2. 🖥️ Admin Control Center (React / Vite)
+A professional web-based dashboard for large-scale farm management and platform oversight.
+- **Unified Monitoring**: Track total users, active ESP32 modules, and system-wide health.
+- **Real-time Activity Log**: Monitor irrigation events, health scans, and security attempts.
+- **Device Management**: Remote visibility into ESP32 status and performance.
+- **Security Hub**: Tracking and logging unauthorized access attempts.
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+### 3. 🤖 IoT Firmware (ESP32 / Arduino)
+The "brain" on the ground that handles physical automation and data collection.
+- **OLED Interface**: Local joystick-driven UI for manual pump overrides and status checks.
+- **Hybrid Control**: Seamless switching between Manual, Auto (sensor-based), and Cloud (remote) modes.
+- **Non-Blocking WiFi**: Robust connectivity with automatic heartbeat synchronization to Firebase.
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+---
 
-## Get a fresh project
+## 🛠️ Technology Stack
 
-When you're ready, run:
+| Component | Technologies |
+|-----------|--------------|
+| **Frontend** | React, React Native, Expo, Lucide Icons |
+| **Styling** | Vanilla CSS (Premium Glassmorphism & Animations) |
+| **Backend** | Node.js (Vite Dev Server) |
+| **Database** | Firebase Realtime Database |
+| **Hardware** | ESP32, OLED (SSD1306), DHT11, Soil Moisture Sensors |
+| **AI/ML** | NVIDIA Vision Models Integration |
 
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+- Node.js (v18+)
+- Expo CLI
+- Arduino IDE (for ESP32)
+- Firebase Project Credentials
+
+### Installation
+
+#### 1. Clone the repository
 ```bash
-npm run reset-project
+git clone https://github.com/CodeCrafter3-0-3/FarmSense_AI.git
+cd FarmSense_AI
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+#### 2. Setup Admin Panel
+```bash
+cd admin-panel
+npm install
+npm run dev
+```
 
-## Learn more
+#### 3. Setup Mobile App
+```bash
+npm install
+npx expo start
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+---
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+## 🔒 Security & Performance
+- **Custom Hashing**: Shared authentication logic between Web and Mobile for seamless cross-platform login.
+- **Optimized Persistence**: Real-time data sync with minimal latency using Firebase.
+- **Premium Design System**: Custom-built CSS variables for ultra-responsive and "wow" factor aesthetics.
 
-## Join the community
+---
 
-Join our community of developers creating universal apps.
+## 👥 Contributors
+Developed with ❤️ by the FarmSense AI Team.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+---
+
+*“Empowering farmers with the intelligence of tomorrow, today.”*
