@@ -43,9 +43,26 @@ if (!NVIDIA_API_KEY || !OPENWEATHER_API_KEY || !FIREBASE_DB_URL) {
 }
 
 // ─── Firebase Admin Init ─────────────────────
-admin.initializeApp({ databaseURL: FIREBASE_DB_URL });
+try {
+  const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT 
+    ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT) 
+    : null;
+
+  if (serviceAccount) {
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+      databaseURL: FIREBASE_DB_URL
+    });
+    log('SYSTEM', 'Firebase Admin initialized with Service Account');
+  } else {
+    log('SYSTEM', '⚠️ WARNING: No FIREBASE_SERVICE_ACCOUNT found. Backend may fail to authenticate.');
+    admin.initializeApp({ databaseURL: FIREBASE_DB_URL });
+  }
+} catch (err) {
+  log('SYSTEM', `❌ Firebase Init Error: ${err.message}`);
+}
 const db = admin.database();
-log('SYSTEM', `Firebase connected: ${FIREBASE_DB_URL}`);
+log('SYSTEM', `Database connected: ${FIREBASE_DB_URL}`);
 
 // ═══════════════════════════════════════════════════════════════
 // 🔴 1. SECURITY — Rate Limiting
