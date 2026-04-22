@@ -43,25 +43,33 @@ if (!NVIDIA_API_KEY || !OPENWEATHER_API_KEY || !FIREBASE_DB_URL) {
 }
 
 // ─── Firebase Admin Init ─────────────────────
+let db;
 try {
-  const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT 
-    ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT) 
-    : null;
+  const saRaw = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (saRaw) {
+    const serviceAccount = JSON.parse(saRaw);
+    
+    // Fix private key formatting (newlines get escaped in env vars)
+    if (serviceAccount.private_key) {
+      serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+    }
 
-  if (serviceAccount) {
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount),
       databaseURL: FIREBASE_DB_URL
     });
+    db = admin.database();
     log('SYSTEM', 'Firebase Admin initialized with Service Account');
   } else {
-    log('SYSTEM', '⚠️ WARNING: No FIREBASE_SERVICE_ACCOUNT found. Backend may fail to authenticate.');
+    log('SYSTEM', '⚠️ WARNING: No FIREBASE_SERVICE_ACCOUNT found.');
     admin.initializeApp({ databaseURL: FIREBASE_DB_URL });
+    db = admin.database();
   }
 } catch (err) {
   log('SYSTEM', `❌ Firebase Init Error: ${err.message}`);
+  // Create a dummy DB object to prevent total crash if init fails
+  db = { ref: () => ({ push: () => Promise.resolve(), set: () => Promise.resolve(), on: () => {} }) };
 }
-const db = admin.database();
 log('SYSTEM', `Database connected: ${FIREBASE_DB_URL}`);
 
 // ═══════════════════════════════════════════════════════════════
