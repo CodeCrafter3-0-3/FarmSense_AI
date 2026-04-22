@@ -1,8 +1,8 @@
 // AI Service — NVIDIA API Integration for FarmSense AI
 // Uses z-ai/glm4.7 model via NVIDIA Integrate API
 
-const NVIDIA_API_KEY = process.env.EXPO_PUBLIC_NVIDIA_API_KEY;
-const NVIDIA_BASE_URL = 'https://integrate.api.nvidia.com/v1';
+const BACKEND_URL = 'https://farm-sense-ai.onrender.com/api';
+const API_AUTH_TOKEN = 'farmsense_secret_token_2026';
 
 // ─────────────────────────────────────────────
 // Chat Query — Text-based AI farming assistant
@@ -13,51 +13,35 @@ export async function sendChatQuery(
   sensorContext?: { soilMoisture?: number; temperature?: number; humidity?: number }
 ): Promise<string> {
   try {
-    // Build a context-aware prompt
-    let systemPrompt = `You are FarmSense AI, an expert agricultural assistant for farmers in India. 
-You provide advice on crop health, irrigation, pest control, and farming best practices.
-Always respond in ${language}.
-Keep responses concise and actionable (under 200 words).`;
-
-    if (sensorContext) {
-      systemPrompt += `\n\nCurrent farm sensor data:
-- Soil Moisture: ${sensorContext.soilMoisture ?? 'N/A'}%
-- Temperature: ${sensorContext.temperature ?? 'N/A'}°C
-- Humidity: ${sensorContext.humidity ?? 'N/A'}%`;
-    }
-
-    const response = await fetch(`${NVIDIA_BASE_URL}/chat/completions`, {
+    const response = await fetch(`${BACKEND_URL}/ai/query`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${NVIDIA_API_KEY}`,
+        'x-api-token': API_AUTH_TOKEN,
       },
       body: JSON.stringify({
-        model: 'meta/llama-3.1-8b-instruct', // Use a high-availability, stable model
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: message },
-        ],
-        temperature: 0.7,
-        top_p: 0.9,
-        max_tokens: 1024,
-        stream: false,
+        message,
+        sensorData: sensorContext,
       }),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('NVIDIA API Error status:', response.status, errorText);
+      console.error('Backend AI Error:', response.status, errorText);
       return 'AI service is temporarily unavailable. Please try again later.';
     }
 
-    const data = await response.json();
-
-    if (data.choices && data.choices.length > 0) {
-      return data.choices[0].message.content || 'Sorry, I could not generate a response.';
+    const result = await response.json();
+    
+    if (result.success && result.data.response) {
+      const responses = result.data.response;
+      // Select response based on language
+      if (language === 'Hindi') return responses.hindi;
+      if (language === 'Punjabi') return responses.punjabi;
+      return responses.english;
     }
 
-    return 'Sorry, I could not process your query. Please try again.';
+    return 'Sorry, I could not generate a response.';
   } catch (error) {
     console.error('AI Chat Error:', error);
     return 'Connection error. Please check your internet and try again.';
@@ -68,110 +52,50 @@ Keep responses concise and actionable (under 200 words).`;
 // Image Analysis — Disease detection using VISION model
 // Uses multimodal format so the AI can actually SEE the image
 // ─────────────────────────────────────────────
+// ─────────────────────────────────────────────
+// Image Analysis — Disease detection using VISION model
+// ─────────────────────────────────────────────
 export async function analyzeImage(
   imageBase64: string,
-  language: string = 'English'
+  language: string = 'English',
+  userId: string = 'user_001'
 ): Promise<{
   diseaseName: string;
   confidence: number;
   recommendation: string;
 }> {
   try {
-    // Truncate very large images to avoid API limits (keep first ~2MB of base64)
-    const maxBase64Length = 2000000;
-    const trimmedBase64 = imageBase64.length > maxBase64Length
-      ? imageBase64.substring(0, maxBase64Length)
-      : imageBase64;
-
-    const systemPrompt = `You are an expert agricultural plant pathologist and crop disease detection specialist.
-Analyze the provided crop/plant image carefully and identify any visible diseases, deficiencies, or pest damage.
-
-IMPORTANT: You MUST respond in EXACTLY this format (no extra text before or after):
-DISEASE: [disease name or "Healthy" if plant looks healthy]
-CONFIDENCE: [number between 0-100]%
-RECOMMENDATION: [2-3 sentences of actionable treatment advice]
-
-Respond in ${language}.`;
-
-    // Use vision-capable model with multimodal content format
-    const response = await fetch(`${NVIDIA_BASE_URL}/chat/completions`, {
+    const response = await fetch(`${BACKEND_URL}/ai/analyze-image`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${NVIDIA_API_KEY}`,
+        'x-api-token': API_AUTH_TOKEN,
       },
       body: JSON.stringify({
-        model: 'meta/llama-3.2-11b-vision-instruct', // Switch to a stable, highly reliable vision model
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: systemPrompt },
-              {
-                type: 'image_url',
-                image_url: {
-                  url: `data:image/jpeg;base64,${trimmedBase64}`,
-                },
-              },
-            ],
-          },
-        ],
-        temperature: 0.3,
-        max_tokens: 512,
-        stream: false,
+        userId,
+        imageBase64,
+        language,
       }),
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('NVIDIA Vision API Error:', response.status, errorText);
-      
-      // If we get an "Internal Server Error" or similar, use the fallback
-      if (response.status >= 500 || errorText.includes('Internal Server Error')) {
-         throw new Error('AI Server side error');
-      }
-      throw new Error(`AI analysis failed: ${errorText}`);
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Backend analysis failed');
     }
 
-    const data = await response.json();
-    const text = data.choices?.[0]?.message?.content || '';
+    const result = await response.json();
+    if (result.success) {
+      return result.data;
+    }
 
-    console.log('Vision AI raw response:', text);
-
-    // Parse the structured response (more robust regex that looks ahead for labels)
-    const diseaseMatch = text.match(/DISEASE:\s*(.+?)(?=\s*CONFIDENCE:|\s*RECOMMENDATION:|\n|$)/i);
-    const confidenceMatch = text.match(/CONFIDENCE:\s*(\d+)/i);
-    const recMatch = text.match(/RECOMMENDATION:\s*(.+)/is);
-
-    let disease = diseaseMatch?.[1]?.trim() || 'Unknown';
-    // Remove trailing artifacts from disease name if patterns like 'CONFIDENCE:' leaked in
-    disease = disease.split(/CONFIDENCE:|RECOMMENDATION:/i)[0].trim();
-    
-    const confidence = parseInt(confidenceMatch?.[1] || '50');
-    const recommendation = recMatch?.[1]?.trim() || text || 'Please consult a local agricultural expert for detailed analysis.';
-
-    return { diseaseName: disease, confidence, recommendation };
-  } catch (error) {
+    throw new Error(result.error || 'Invalid response from backend');
+  } catch (error: any) {
     console.error('Image Analysis Error:', error);
-
-    // Fallback: use text model to give generic advice if vision fails
-    try {
-      const fallbackResponse = await sendChatQuery(
-        'A farmer has sent a photo of their crop that appears to have some discoloration or damage. Without seeing the specific image, what are the most common crop diseases in Indian agriculture and what should the farmer check for? Give practical advice.',
-        language
-      );
-      return {
-        diseaseName: 'Unable to detect — see advice below',
-        confidence: 0,
-        recommendation: fallbackResponse,
-      };
-    } catch {
-      return {
-        diseaseName: 'Analysis Failed',
-        confidence: 0,
-        recommendation: 'Could not analyze. Please ensure you have a stable internet connection and try again.',
-      };
-    }
+    return {
+      diseaseName: 'Analysis Failed',
+      confidence: 0,
+      recommendation: error.message || 'Could not connect to AI server. Please check your internet and try again.',
+    };
   }
 }
 

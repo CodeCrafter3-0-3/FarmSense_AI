@@ -409,12 +409,48 @@ app.get('/api/weather/:lat/:lng', async (req, res) => {
     );
     const forecastData = await forecastRes.json();
 
+    // Helper to pick "worst" icon (Rain > Cloudy > Sunny)
+    const getPriority = (iconCode) => {
+      if (iconCode.includes('11')) return 5; // lightning
+      if (iconCode.includes('09') || iconCode.includes('10')) return 4; // rain
+      if (iconCode.includes('03') || iconCode.includes('04')) return 3; // clouds
+      return 1; // sun/clear
+    };
+
+    const dailyMap = {};
+    (forecastData.list || []).forEach(item => {
+      const date = new Date(item.dt * 1000).toISOString().split('T')[0];
+      if (!dailyMap[date]) {
+        dailyMap[date] = { temps: [], icons: [], pops: [], condition: item.weather[0].description };
+      }
+      dailyMap[date].temps.push(item.main.temp);
+      dailyMap[date].icons.push(item.weather[0].icon);
+      dailyMap[date].pops.push(item.pop || 0);
+    });
+
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const daily = Object.entries(dailyMap).slice(0, 5).map(([dateStr, data]) => {
+      const date = new Date(dateStr);
+      // Pick icon with highest priority
+      const bestIcon = data.icons.reduce((prev, curr) => getPriority(curr) > getPriority(prev) ? curr : prev, data.icons[0]);
+      const maxPop = Math.max(...data.pops);
+      
+      return {
+        day: dayNames[date.getDay()],
+        icon: bestIcon,
+        pRain: Math.round(maxPop * 100),
+        min: Math.round(Math.min(...data.temps)),
+        max: Math.round(Math.max(...data.temps)),
+        condition: data.condition,
+      };
+    });
+
     const weatherObj = {
       current: {
         temp: Math.round(currentData.main?.temp || 0),
         humidity: currentData.main?.humidity || 0,
         pressure: currentData.main?.pressure || 0,
-        visibility: currentData.visibility || 0,
+        visibility: Math.round((currentData.visibility || 0) / 1000),
         city: currentData.name || 'Unknown',
         condition: currentData.weather?.[0]?.description || 'Unknown',
         icon: currentData.weather?.[0]?.icon || '01d',
@@ -426,8 +462,10 @@ app.get('/api/weather/:lat/:lng', async (req, res) => {
         time: new Date(item.dt * 1000).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' }),
         temp: Math.round(item.main.temp),
         condition: item.weather[0].description,
+        icon: item.weather[0].icon,
         pRain: item.pop ? Math.round(item.pop * 100) : 0,
       })),
+      daily,
       rainProbability: Math.max(...(forecastData.list || []).slice(0, 8).map(i => Math.round((i.pop || 0) * 100))),
     };
 
@@ -524,6 +562,80 @@ Keep each response concise and actionable (under 200 words).`;
 
     log('AI', `Response sent to ${userId} (${rawReply.length} chars)`);
     sendSuccess(res, { response: structuredResponse, queryId: queryEntry.timestamp });
+  } catch (error) {
+    sendError(res, error.message);
+  }
+});
+
+// ─── Image Analysis ───────────────────────────
+app.post('/api/ai/analyze-image', aiLimiter, async (req, res) => {
+  try {
+    const { userId = 'user_001', imageBase64, language = 'English' } = req.body;
+
+    if (!imageBase64) {
+      return sendError(res, 'imageBase64 is required', 400);
+    }
+
+    const systemPrompt = `You are an expert agricultural plant pathologist. 
+Analyze the plant image and identify diseases/deficiencies.
+Respond in EXACTLY this format:
+DISEASE: [name]
+CONFIDENCE: [0-100]%
+RECOMMENDATION: [2-3 sentences]
+Respond in ${language}.`;
+
+    log('AI', `Image analysis request from ${userId} (${language})`);
+
+    const aiRes = await fetch(`${NVIDIA_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${NVIDIA_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'meta/llama-3.2-11b-vision-instruct',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: systemPrompt },
+              { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBase64}` } },
+            ],
+          },
+        ],
+        temperature: 0.2,
+      }),
+    });
+
+    if (!aiRes.ok) {
+      const errorBody = await aiRes.text();
+      log('AI', `NVIDIA API Error: ${aiRes.status} - ${errorBody}`);
+      throw new Error(`AI Provider Error: ${aiRes.status}`);
+    }
+
+    const aiData = await aiRes.json();
+    const text = aiData.choices?.[0]?.message?.content || '';
+    log('AI', `Raw Response Snippet: ${text.substring(0, 100)}...`);
+
+    // Parse structured text
+    const diseaseMatch = text.match(/DISEASE:\s*(.+)/i);
+    const confidenceMatch = text.match(/CONFIDENCE:\s*(\d+)/i);
+    const recMatch = text.match(/RECOMMENDATION:\s*(.+)/is);
+
+    const result = {
+      diseaseName: diseaseMatch?.[1]?.split('\n')[0]?.trim() || 'Unknown',
+      confidence: parseInt(confidenceMatch?.[1] || '50'),
+      recommendation: recMatch?.[1]?.trim() || text,
+    };
+
+    // Save to Firebase
+    await db.ref(`health_scans/${userId}`).push({
+      ...result,
+      timestamp: Date.now(),
+    });
+
+    log('AI', `Scan complete for ${userId}: ${result.diseaseName}`);
+    sendSuccess(res, result);
   } catch (error) {
     sendError(res, error.message);
   }

@@ -96,16 +96,50 @@ export function useIrrigation(userId: string = DEFAULT_USER_ID) {
   return { data, waterUsage, loading };
 }
 
+const BACKEND_URL = 'https://farm-sense-ai.onrender.com/api';
+const API_AUTH_TOKEN = 'farmsense_secret_token_2026';
+
 export async function updatePumpStatus(userId: string = DEFAULT_USER_ID, status: 'ON' | 'OFF') {
-  await set(ref(db, `irrigation/${userId}/pumpStatus`), status);
+  try {
+    const response = await fetch(`${BACKEND_URL}/irrigation/pump`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-token': API_AUTH_TOKEN,
+      },
+      body: JSON.stringify({ userId, status }),
+    });
+    
+    if (!response.ok) throw new Error('Failed to update pump');
+    console.log(`✅ Pump ${status} command sent to backend`);
+  } catch (error) {
+    console.error('Pump update error:', error);
+    // Fallback to direct Firebase write if backend is down
+    await set(ref(db, `irrigation/${userId}/pumpStatus`), status);
+  }
+}
+
+export async function updateThreshold(userId: string = DEFAULT_USER_ID, threshold: number) {
+  try {
+    const response = await fetch(`${BACKEND_URL}/irrigation/threshold`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-token': API_AUTH_TOKEN,
+      },
+      body: JSON.stringify({ userId, threshold }),
+    });
+
+    if (!response.ok) throw new Error('Failed to update threshold');
+    console.log(`✅ Threshold ${threshold}% sent to backend`);
+  } catch (error) {
+    console.error('Threshold update error:', error);
+    await set(ref(db, `irrigation/${userId}/threshold`), threshold);
+  }
 }
 
 export async function updateIrrigationMode(userId: string = DEFAULT_USER_ID, mode: 'AUTO' | 'MANUAL') {
   await set(ref(db, `irrigation/${userId}/mode`), mode);
-}
-
-export async function updateThreshold(userId: string = DEFAULT_USER_ID, threshold: number) {
-  await set(ref(db, `irrigation/${userId}/threshold`), threshold);
 }
 
 export async function updateIrrigationTimer(userId: string = DEFAULT_USER_ID, timer: number) {

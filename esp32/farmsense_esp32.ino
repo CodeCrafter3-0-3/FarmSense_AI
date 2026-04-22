@@ -17,6 +17,8 @@ const char* WIFI_SSID     = "Shinchan_4G";
 const char* WIFI_PASSWORD = "manmeet8549";
 const char* FIREBASE_HOST = "https://farmsense-580c0-default-rtdb.firebaseio.com";
 const char* DEVICE_CODE   = "1234";
+const char* BACKEND_URL   = "https://farm-sense-ai.onrender.com/api";
+const char* BACKEND_TOKEN = "farmsense_secret_token_2026";
 
 // --- PINS ---
 #define DHT_PIN 4
@@ -114,14 +116,27 @@ void setPump(bool on) {
 }
 
 void readSenses() {
-  float temp = dht.readTemperature(); if (!isnan(temp) && temp < 100) { t = temp; h = dht.readHumidity(); }
+  float temp = dht.readTemperature(); 
+  if (!isnan(temp) && temp < 100) { t = temp; h = dht.readHumidity(); }
   moist = constrain(map(analogRead(SOIL_PIN), 4095, 1500, 0, 100), 0, 100);
+  
   if (WiFi.status() == WL_CONNECTED) {
-    StaticJsonDocument<256> doc; doc["soilMoisture"] = moist; doc["temperature"] = round(t * 10) / 10.0;
-    doc.createNestedObject("timestamp")[".sv"] = "timestamp";
+    StaticJsonDocument<256> doc;
+    doc["soilMoisture"] = moist;
+    doc["temperature"] = round(t * 10) / 10.0;
+    doc["humidity"] = round(h * 10) / 10.0;
+    
     String j; serializeJson(doc, j);
-    httpPut(String(FIREBASE_HOST) + "/sensorData/" + DEVICE_CODE + "/latest.json", j);
-    httpPost(String(FIREBASE_HOST) + "/sensorData/" + DEVICE_CODE + "/history.json", j);
+    
+    // POST to Render Backend (triggers alerts + smart irrigation)
+    HTTPClient http;
+    http.begin(String(BACKEND_URL) + "/sensors/" + DEVICE_CODE);
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("x-api-token", BACKEND_TOKEN);
+    int code = http.POST(j);
+    http.end();
+    
+    Serial.printf("[BACKEND] Sensor Update Code: %d\n", code);
   }
 }
 
@@ -157,9 +172,18 @@ void sync(unsigned long now) {
       if (target != pumpOn) setPump(target);
     }
 
-    // Heartbeat
-    StaticJsonDocument<100> hb; hb["status"] = "online"; hb.createNestedObject("lastSeen")[".sv"] = "timestamp";
-    String j; serializeJson(hb, j); httpPatch(String(FIREBASE_HOST) + "/devices/" + DEVICE_CODE + ".json", j);
+    // Heartbeat via Backend Registration
+    StaticJsonDocument<100> hb;
+    hb["deviceCode"] = DEVICE_CODE;
+    hb["ip"] = WiFi.localIP().toString();
+    String j; serializeJson(hb, j);
+    
+    HTTPClient http;
+    http.begin(String(BACKEND_URL) + "/devices/register");
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("x-api-token", BACKEND_TOKEN);
+    http.POST(j);
+    http.end();
   }
   h_cli.end();
 }

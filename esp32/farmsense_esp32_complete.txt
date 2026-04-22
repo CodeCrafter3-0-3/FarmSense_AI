@@ -21,6 +21,8 @@ const char* WIFI_SSID     = "Shinchan_4G";
 const char* WIFI_PASSWORD = "manmeet8549";
 const char* FIREBASE_HOST = "https://farmsense-580c0-default-rtdb.firebaseio.com";
 const char* DEVICE_CODE   = "1234";
+const char* BACKEND_URL   = "https://farm-sense-ai.onrender.com/api";
+const char* BACKEND_TOKEN = "farmsense_secret_token_2026";
 
 // --- PINS ---
 #define DHT_PIN          4
@@ -218,26 +220,44 @@ void readAndUploadSensors() {
   if (!isnan(t) && t < 100) { currentTemp = t; currentHum = h; }
   int raw = analogRead(SOIL_SENSOR_PIN);
   currentMoisture = constrain(map(raw, 4095, 1500, 0, 100), 0, 100);
+  
   if (WiFi.status() == WL_CONNECTED) {
     StaticJsonDocument<256> doc;
-    doc["soilMoisture"] = currentMoisture; doc["temperature"] = round(currentTemp * 10) / 10.0;
-    doc.createNestedObject("timestamp")[".sv"] = "timestamp";
+    doc["soilMoisture"] = currentMoisture;
+    doc["temperature"] = round(currentTemp * 10) / 10.0;
+    doc["humidity"] = round(currentHum * 10) / 10.0;
+    
     String json; serializeJson(doc, json);
-    httpPut(String(FIREBASE_HOST) + "/sensorData/" + DEVICE_CODE + "/latest.json", json);
-    httpPost(String(FIREBASE_HOST) + "/sensorData/" + DEVICE_CODE + "/history.json", json);
+    
+    // POST to Render Backend (triggers alerts + smart irrigation)
+    HTTPClient http;
+    http.begin(String(BACKEND_URL) + "/sensors/" + DEVICE_CODE);
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("x-api-token", BACKEND_TOKEN);
+    http.POST(json);
+    http.end();
   }
 }
 
 void checkPumpStatus(unsigned long now) {
   if (WiFi.status() != WL_CONNECTED) return;
   HTTPClient http;
-  http.begin(String(FIREBASE_HOST) + "/irrigation/" + DEVICE_CODE + ".json");
+  // Fetch settings via Backend (centralized logic)
+  http.begin(String(BACKEND_URL) + "/irrigation/" + DEVICE_CODE);
+  http.addHeader("x-api-token", BACKEND_TOKEN);
+  
   if (http.GET() == 200) {
-    StaticJsonDocument<512> doc; deserializeJson(doc, http.getString());
-    if (!manualOverride) {
-      controlMode = String(doc["mode"] | "MANUAL");
-      bool decision = (String(doc["pumpStatus"] | "OFF") == "ON");
-      if (controlMode == "AUTO" && currentMoisture < (doc["threshold"] | 30) && !decision) decision = true;
+    StaticJsonDocument<512> doc;
+    deserializeJson(doc, http.getString());
+    
+    // The data is inside "data" property from backend response
+    JsonObject data = doc["data"];
+    if (!manualOverride && !data.isNull()) {
+      controlMode = String(data["mode"] | "MANUAL");
+      bool decision = (String(data["pumpStatus"] | "OFF") == "ON");
+      
+      // AUTO Logic (Backend also handles this, but local check is good for safety)
+      if (controlMode == "AUTO" && currentMoisture < (data["threshold"] | 30) && !decision) decision = true;
       reqPumpChange(decision, controlMode);
     }
   }
@@ -245,10 +265,17 @@ void checkPumpStatus(unsigned long now) {
 }
 
 void registerDevice() {
-  StaticJsonDocument<200> doc; doc["status"] = "online";
-  doc.createNestedObject("lastSeen")[".sv"] = "timestamp";
+  StaticJsonDocument<200> doc;
+  doc["deviceCode"] = DEVICE_CODE;
+  doc["ip"] = WiFi.localIP().toString();
   String json; serializeJson(doc, json);
-  httpPatch(String(FIREBASE_HOST) + "/devices/" + DEVICE_CODE + ".json", json);
+  
+  HTTPClient http;
+  http.begin(String(BACKEND_URL) + "/devices/register");
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("x-api-token", BACKEND_TOKEN);
+  http.POST(json);
+  http.end();
 }
 
 void setRelay(bool on) { digitalWrite(RELAY_PIN, on ? LOW : HIGH); }
