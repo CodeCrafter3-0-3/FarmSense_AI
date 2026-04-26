@@ -45,30 +45,45 @@ if (!NVIDIA_API_KEY || !OPENWEATHER_API_KEY || !FIREBASE_DB_URL) {
 // ─── Firebase Admin Init ─────────────────────
 let db;
 try {
-  const saRaw = process.env.FIREBASE_SERVICE_ACCOUNT;
-  if (saRaw) {
-    const serviceAccount = JSON.parse(saRaw);
+  const saPath = path.join(__dirname, 'service-account.json');
+  let serviceAccount;
+
+  if (fs.existsSync(saPath)) {
+    // 1. Try loading from Secret File (Most reliable)
+    serviceAccount = JSON.parse(fs.readFileSync(saPath, 'utf8'));
+    log('SYSTEM', 'Firebase Admin initialized via service-account.json');
+  } else if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    // 2. Fallback to Environment Variable
+    const saRaw = process.env.FIREBASE_SERVICE_ACCOUNT;
+    serviceAccount = JSON.parse(saRaw);
     
     // Fix private key formatting (newlines get escaped in env vars)
     if (serviceAccount.private_key) {
       serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
     }
+    log('SYSTEM', 'Firebase Admin initialized via Environment Variable');
+  }
 
+  if (serviceAccount) {
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount),
       databaseURL: FIREBASE_DB_URL
     });
     db = admin.database();
-    log('SYSTEM', 'Firebase Admin initialized with Service Account');
   } else {
-    log('SYSTEM', '⚠️ WARNING: No FIREBASE_SERVICE_ACCOUNT found.');
+    log('SYSTEM', '⚠️ WARNING: No service account found. Using public access (restricted).');
     admin.initializeApp({ databaseURL: FIREBASE_DB_URL });
     db = admin.database();
   }
 } catch (err) {
   log('SYSTEM', `❌ Firebase Init Error: ${err.message}`);
-  // Create a dummy DB object to prevent total crash if init fails
-  db = { ref: () => ({ push: () => Promise.resolve(), set: () => Promise.resolve(), on: () => {} }) };
+  // Fallback to basic init if cert fails
+  try {
+    admin.initializeApp({ databaseURL: FIREBASE_DB_URL });
+    db = admin.database();
+  } catch {
+    db = { ref: () => ({ push: () => Promise.resolve(), set: () => Promise.resolve(), on: () => {} }) };
+  }
 }
 log('SYSTEM', `Database connected: ${FIREBASE_DB_URL}`);
 
