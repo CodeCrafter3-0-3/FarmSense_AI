@@ -45,13 +45,16 @@ if (!NVIDIA_API_KEY || !OPENWEATHER_API_KEY || !FIREBASE_DB_URL) {
 // ─── Firebase Admin Init ─────────────────────
 let db;
 try {
-  const saPath = path.join(__dirname, 'service-account.json');
+  const saPathLocal = path.join(__dirname, 'service-account.json');
+  const saPathParent = path.join(__dirname, '..', 'service-account.json');
   let serviceAccount;
 
-  if (fs.existsSync(saPath)) {
-    // 1. Try loading from Secret File (Most reliable)
-    serviceAccount = JSON.parse(fs.readFileSync(saPath, 'utf8'));
-    log('SYSTEM', 'Firebase Admin initialized via service-account.json');
+  if (fs.existsSync(saPathLocal)) {
+    serviceAccount = JSON.parse(fs.readFileSync(saPathLocal, 'utf8'));
+    log('SYSTEM', 'Firebase Admin initialized via ./service-account.json');
+  } else if (fs.existsSync(saPathParent)) {
+    serviceAccount = JSON.parse(fs.readFileSync(saPathParent, 'utf8'));
+    log('SYSTEM', 'Firebase Admin initialized via ../service-account.json');
   } else if (process.env.FIREBASE_SERVICE_ACCOUNT) {
     // 2. Fallback to Environment Variable
     const saRaw = process.env.FIREBASE_SERVICE_ACCOUNT;
