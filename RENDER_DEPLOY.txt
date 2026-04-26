@@ -1,0 +1,264 @@
+════════════════════════════════════════════════════════════════
+  FarmSense AI — Backend Deployment Guide for Render.com
+════════════════════════════════════════════════════════════════
+
+This guide walks you through deploying the FarmSense AI backend
+(backend/server.js) on Render as a free Web Service.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 1 — PREREQUISITES (Do these BEFORE going to Render)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1.1 — Ensure your project is pushed to GitHub
+    - The backend folder lives at: farmsense-ai/backend/
+    - Make sure backend/.gitignore has "node_modules/" and ".env"
+      (it already does — don't commit your .env file!)
+    - Commit and push all latest changes:
+
+        git add .
+        git commit -m "chore: prepare backend for Render deploy"
+        git push origin main
+
+1.2 — Verify package.json has the correct start script
+    The file backend/package.json already has:
+        "scripts": {
+          "start": "node server.js"
+        }
+    This is what Render will use to start your server. ✅
+
+1.3 — Verify PORT is dynamic in server.js
+    server.js already reads:
+        const PORT = process.env.PORT || 3001;
+    Render injects PORT automatically. ✅
+
+1.4 — Note down your environment variable values
+    You will need these during Render setup:
+
+        FIREBASE_DB_URL     = https://farmsense-580c0-default-rtdb.firebaseio.com
+        NVIDIA_API_KEY      = (your NVIDIA API key)
+        OPENWEATHER_API_KEY = (your OpenWeatherMap API key)
+        API_AUTH_TOKEN      = farmsense_secret_token_2026
+        (PORT is set automatically by Render — do NOT add it manually)
+
+    IMPORTANT: Keep these values secret. Never push .env to GitHub.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 2 — FIREBASE SERVICE ACCOUNT (Critical Step)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Your server.js uses firebase-admin with only a databaseURL.
+This works if your Firebase project allows unauthenticated
+admin access OR if you are using Application Default Credentials.
+
+For a production Render deployment, you should add a Service
+Account key. Here is how:
+
+Step A — Go to Firebase Console:
+    https://console.firebase.google.com
+    → Your project (farmsense-580c0)
+    → Project Settings → Service Accounts
+    → Click "Generate new private key"
+    → Download the JSON file (e.g., serviceAccountKey.json)
+
+Step B — Convert the JSON to a single-line string:
+    Open the downloaded JSON file and minify it (remove newlines).
+    You can use: https://www.textfixer.com/tools/remove-line-breaks.php
+    OR run in PowerShell:
+        (Get-Content serviceAccountKey.json -Raw) -replace '\s+', ' '
+
+Step C — Add it as an environment variable on Render:
+    Variable name:  FIREBASE_SERVICE_ACCOUNT
+    Value:          (the single-line JSON string from Step B)
+
+Step D — Update server.js to use the service account:
+    Replace the admin.initializeApp line with:
+
+        const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+        admin.initializeApp({
+          credential: admin.credential.cert(serviceAccount),
+          databaseURL: FIREBASE_DB_URL,
+        });
+
+    This is required for Render since it is not running inside Google Cloud.
+
+NOTE: If your current setup already works without a service account key
+      (using public Firebase rules), you may skip this section for now,
+      but production apps should always use proper credentials.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 3 — DEPLOY ON RENDER (Step-by-Step)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Step 1 — Create a Render account
+    Go to: https://render.com
+    Sign up with GitHub (recommended — makes repo linking easy).
+
+Step 2 — Create a new Web Service
+    Dashboard → New → Web Service
+
+Step 3 — Connect your GitHub repository
+    - Select "Connect a repository"
+    - Find and select: farmsense-ai (or your repo name)
+    - Click "Connect"
+
+Step 4 — Configure the Web Service settings
+
+    Name:           farmsense-backend  (or any name you prefer)
+    Region:         Singapore (closest to India) — or Oregon if unavailable
+    Branch:         main
+    Root Directory: backend             ← IMPORTANT: Set this to "backend"
+    Runtime:        Node
+    Build Command:  npm install
+    Start Command:  npm start
+    Plan:           Free
+
+    The "Root Directory: backend" tells Render to look inside the
+    backend/ subfolder of your repo, where package.json lives.
+
+Step 5 — Add Environment Variables
+    Scroll down to the "Environment Variables" section.
+    Click "Add Environment Variable" for each one below:
+
+    Key                     | Value
+    ───────────────────────────────────────────────────────
+    FIREBASE_DB_URL         | https://farmsense-580c0-default-rtdb.firebaseio.com
+    NVIDIA_API_KEY          | (your actual NVIDIA API key)
+    OPENWEATHER_API_KEY     | (your actual OpenWeatherMap key)
+    API_AUTH_TOKEN          | farmsense_secret_token_2026
+    FIREBASE_SERVICE_ACCOUNT| (minified JSON string — see Section 2)
+    ───────────────────────────────────────────────────────
+    DO NOT add PORT — Render sets it automatically.
+
+Step 6 — Click "Create Web Service"
+    Render will:
+    ✓ Clone your repo
+    ✓ Run: npm install (inside backend/)
+    ✓ Run: npm start
+    ✓ Assign a public URL like: https://farmsense-backend.onrender.com
+
+Step 7 — Verify the deployment
+    Once deployed, open in browser:
+        https://farmsense-backend.onrender.com/api/health
+
+    You should see a JSON response like:
+    {
+      "success": true,
+      "data": {
+        "status": "ok",
+        "service": "FarmSense AI Backend v2.0",
+        "uptime": 12,
+        ...
+      }
+    }
+
+    If you see this — your backend is live! 🎉
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 4 — UPDATE YOUR APP TO USE THE RENDER URL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+After deploying, you must update any place in your code that
+points to localhost:3001 and replace it with your Render URL.
+
+4.1 — Update the root .env file (farmsense-ai/.env):
+    Find the line with BACKEND_URL or API_BASE_URL and set it to:
+        EXPO_PUBLIC_API_URL=https://farmsense-backend.onrender.com
+
+4.2 — Search your codebase for hardcoded localhost references:
+    Run in terminal (from farmsense-ai/ root):
+        grep -r "localhost:3001" services/ app/ constants/
+
+4.3 — Update your services/api.js or equivalent file:
+    Change:  const BASE_URL = 'http://localhost:3001';
+    To:      const BASE_URL = process.env.EXPO_PUBLIC_API_URL
+                              || 'https://farmsense-backend.onrender.com';
+
+4.4 — Update the admin panel (admin-panel/) if it calls the backend:
+    Similarly update vite.config.js proxy or .env.local file.
+
+4.5 — Update ESP32 firmware (esp32/):
+    In the .ino file, find the server URL constant and update:
+        const char* serverUrl = "https://farmsense-backend.onrender.com";
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 5 — IMPORTANT NOTES ABOUT THE FREE TIER
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⚠️  FREE TIER COLD STARTS:
+    On Render's free plan, the server spins down after 15 minutes
+    of inactivity. The first request after sleep takes ~30-50 seconds.
+
+    Solutions:
+    a) Upgrade to Render's Starter plan ($7/mo) — always-on.
+    b) Use a free uptime monitor to ping /api/health every 10 minutes:
+       - UptimeRobot (https://uptimerobot.com) — free plan available
+       - BetterUptime, Freshping, etc.
+       - Set monitor URL: https://farmsense-backend.onrender.com/api/health
+       - Set interval: every 5 minutes
+
+⚠️  FREE TIER LIMITS:
+    - 750 free instance hours/month
+    - 512 MB RAM
+    - Shared CPU
+    These are sufficient for a student/demo project.
+
+⚠️  HTTPS ONLY:
+    Render provides a free SSL certificate (HTTPS).
+    Always use the https:// URL in your app, not http://.
+    ESP32 must support HTTPS — use WiFiClientSecure.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 6 — TROUBLESHOOTING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Problem: Build fails with "Cannot find module"
+Fix:     Check that Root Directory is set to "backend" in Render settings.
+
+Problem: "FATAL: Missing required environment variables"
+Fix:     You forgot to add env vars in Render dashboard (Section 3, Step 5).
+
+Problem: Firebase connection errors
+Fix:     Add the FIREBASE_SERVICE_ACCOUNT env var (see Section 2).
+         Also check Firebase Realtime Database rules allow read/write.
+
+Problem: 401 Unauthorized errors from the mobile app
+Fix:     Ensure API_AUTH_TOKEN in Render matches the token used in app
+         services. Both must be identical.
+
+Problem: Server times out on first request (cold start)
+Fix:     Add an uptime monitor (see Section 5). This is expected behavior
+         on the free plan.
+
+Problem: ESP32 HTTPS connection fails
+Fix:     In the ESP32 firmware, use WiFiClientSecure and either:
+         a) Set client.setInsecure() for testing (not production)
+         b) Flash the Render SSL certificate root CA for production
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 7 — QUICK REFERENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Your backend API endpoints (replace BASE_URL with Render URL):
+
+GET  BASE_URL/api/health                    → Health check (no auth)
+POST BASE_URL/api/devices/register          → ESP32 device registration
+GET  BASE_URL/api/devices/:deviceCode       → Validate device
+GET  BASE_URL/api/sensors/:userId           → Latest sensor data
+POST BASE_URL/api/sensors/:userId           → Upload sensor data (ESP32)
+GET  BASE_URL/api/sensors/history/:userId   → Sensor history
+POST BASE_URL/api/irrigation/pump           → Control pump
+GET  BASE_URL/api/irrigation/:userId        → Get irrigation settings
+POST BASE_URL/api/irrigation/threshold      → Set auto-irrigation threshold
+GET  BASE_URL/api/weather/:lat/:lng         → Weather data (cached 15min)
+POST BASE_URL/api/ai/query                  → AI chat (rate: 10/min)
+POST BASE_URL/api/marketplace/listing       → Create marketplace listing
+GET  BASE_URL/api/marketplace/listings      → Browse listings
+GET  BASE_URL/api/alerts/:userId            → Get alerts
+PATCH BASE_URL/api/alerts/:userId/:alertId  → Mark alert as read
+
+Auth header required for all endpoints except /api/health:
+    x-api-token: farmsense_secret_token_2026
+
+════════════════════════════════════════════════════════════════
+  Good luck with your deployment! 🌱
+════════════════════════════════════════════════════════════════
